@@ -74,12 +74,13 @@ sub git_status {
     # ----------------------------------------------------------------------
     # are there unstaged files?
     my $newfiles = grep {/$untracked/} @response;
-    my $unstaged = $newfiles ? $UTF8->{box_x} : $UTF8->{box_check};
-    $summary = $ANSI->{red} if $newfiles;
+    my $not_staged = grep {/Changes not staged for commit:/} @response;
+    my $unstaged = $newfiles || $not_staged? $UTF8->{box_x} : $UTF8->{box_check};
+    $summary = $ANSI->{red} if $newfiles || $not_staged;
 
     # ----------------------------------------------------------------------
     # Are there uncommitted changes?
-    my $changes = anything_to_commit( $response[2] );
+    my $changes = grep {/$uncommitted/} ( @response );
     my $uncommitted = $changes ? $UTF8->{ballot_x} : $UTF8->{checkmark} ;
     $summary = $ANSI->{red} if $changes;
 
