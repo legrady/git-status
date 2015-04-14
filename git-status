@@ -1,0 +1,102 @@
+#!/usr/bin/env perl
+
+use warnings;
+use strict;
+use 5.010;
+use utf8;
+
+use Data::Dumper;
+
+# ----------------------------------------------------------------------
+# CONSTANTS
+#
+my $GIT = '/usr/bin/git';
+
+my $ANSI = { red   => '\e[31m',
+             green => '\e[32m', };
+
+my $UTF8 = { checkmark => '✔',
+             ballot_x  => '✘',
+             box_check => '☑',
+             box_x     => '☒' };
+
+my $git_directory_is_clean = 'nothing to commit, working directory clean';
+my $delta_marker           = 'Your branch is';
+
+my $delta_up_to_date = 'Your branch is up-to-date with \'origin/master\'.';
+my $delta_ahead      = qr{Your branch is ahead of '[^']*' by (\d+) commit};
+my $delta_behind     = qr{Your branch is behind '[^']*' by (\d+) commit};
+
+my $uncommitted = 'Changes to be committed:';
+my $untracked = 'Untracked files:';
+
+# ----------------------------------------------------------------------
+#  SUBROUTINES
+#
+sub git_branch {
+
+    my $cmd = "$GIT branch | grep " . '\*';
+    my $branch = ( split ' ', qx{$cmd} )[1];
+
+    return $branch;
+}
+
+sub anything_to_commit {
+    my ($line) = @_;
+
+    return $line ne $git_directory_is_clean;
+}
+
+sub git_status {
+
+    my $cmd = "$GIT status";
+    my @response = split "\n", qx{$cmd};
+
+    # ----------------------------------------------------------------------
+    # The branch is the last element on the line beginning 'On branch'
+    #
+    my ($line) = grep {/\AOn branch/} @response;
+    my ($branch) = ( split /\s/, $line )[-1];
+
+    # ----------------------------------------------------------------------
+    # Default is green - OK.
+    my $summary = $ANSI->{green};
+    
+    # Are we ahead or behind remore repository? Or 'caught up'?
+    my ($marker) = grep {/$delta_marker/} @response;
+    my $delta = (   $marker eq $delta_up_to_date ? 0
+                  : $marker =~ m{$delta_ahead}   ? $1
+                  : $marker =~ m{$delta_behind}  ? -$1
+                  :   warn "Unexpected string '$marker' in $0 git_statue().\n"
+                );
+    $summary = $ANSI->{red} if $delta;
+
+    # ----------------------------------------------------------------------
+    # are there unstaged files?
+    my $newfiles = grep {/$untracked/} @response;
+    my $unstaged = $newfiles ? $UTF8->{box_x} : $UTF8->{box_check};
+    $summary = $ANSI->{red} if $newfiles;
+
+    # ----------------------------------------------------------------------
+    # Are there uncommitted changes?
+    my $changes = anything_to_commit( $response[2] );
+    my $uncommitted = $changes ? $UTF8->{ballot_x} : $UTF8->{checkmark} ;
+    $summary = $ANSI->{red} if $changes;
+
+    # ----------------------------------------------------------------------
+    return [ $summary, $branch, $delta, $unstaged, $uncommitted ]
+
+}
+
+# ----------------------------------------------------------------------
+# Main processing
+#
+sub main {
+    my $branch = git_branch();
+    my $string = join ' ', @{git_status()};
+    say $string;
+}
+
+main();
+
+__END__;
