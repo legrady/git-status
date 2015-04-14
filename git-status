@@ -35,7 +35,7 @@ my $untracked = 'Untracked files:';
 #
 sub git_branch {
 
-    my $cmd = "$GIT branch | grep " . '\*';
+    my $cmd = "$GIT branch 2>&1 | grep " . '\*';
     my $branch = ( split ' ', qx{$cmd} )[1];
 
     return $branch;
@@ -93,7 +93,7 @@ sub git_status {
 # Main processing
 #
 sub main {
-    my $branch = git_branch();
+    exit unless git_branch();
     my $string = join ' ', @{git_status()};
     say $string;
 }
