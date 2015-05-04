@@ -20,6 +20,8 @@ my $UTF8 = { checkmark => '✔',
              box_check => '☑',
              box_x     => '☒' };
 
+my $branch_marker = 'On branch';
+
 my $git_directory_is_clean = 'nothing to commit, working directory clean';
 my $delta_marker           = 'Your branch is';
 
@@ -27,8 +29,9 @@ my $delta_up_to_date = 'Your branch is up-to-date with \'origin/master\'.';
 my $delta_ahead      = qr{Your branch is ahead of '[^']*' by (\d+) commit};
 my $delta_behind     = qr{Your branch is behind '[^']*' by (\d+) commit};
 
-my $uncommitted = 'Changes to be committed:';
-my $untracked = 'Untracked files:';
+my $changes_not_staged = 'Changes not staged for commit:';
+my $uncommitted        = 'Changes to be committed:';
+my $untracked          = 'Untracked files:';
 
 # ----------------------------------------------------------------------
 #  SUBROUTINES
@@ -41,51 +44,93 @@ sub git_branch {
     return $branch;
 }
 
-sub anything_to_commit {
-    my ($line) = @_;
-
-    return $line ne $git_directory_is_clean;
-}
-
-sub git_status {
+# ----------------------------------------------------------------------
+#
+sub query_git_status {
 
     my $cmd = "$GIT status";
     my @response = split "\n", qx{$cmd};
 
-    # ----------------------------------------------------------------------
-    # The branch is the last element on the line beginning 'On branch'
-    #
-    my ($line) = grep {/\AOn branch/} @response;
+    return @response;
+}
+
+# ----------------------------------------------------------------------
+# The branch is the last element on the line beginning 'On branch'.
+#
+sub extract_branch {
+    my (@raw_data) = @_;
+
+    my ($line) = grep {/\A$branch_marker/} @raw_data;
     my ($branch) = ( split /\s/, $line )[-1];
 
-    # ----------------------------------------------------------------------
-    # Default is green - OK.
-    my $summary = $ANSI->{green};
-    
-    # Are we ahead or behind remore repository? Or 'caught up'?
-    my ($marker) = grep {/$delta_marker/} @response;
-    my $delta = (   $marker eq $delta_up_to_date ? 0
-                  : $marker =~ m{$delta_ahead}   ? $1
-                  : $marker =~ m{$delta_behind}  ? -$1
-                  :   warn "Unexpected string '$marker' in $0 git_statue().\n"
-                );
-    $summary = $ANSI->{red} if $delta;
+    return $branch;
+}
+
+# ----------------------------------------------------------------------
+# Are we ahead or behind remore repository? Or 'caught up'?
+#
+sub calculate_delta {
+    my (@raw_data) = @_;
+
+    my ($marker) = grep {/$delta_marker/} @raw_data;
+    my $delta = 0;
+    if ( defined $marker && $marker ) {
+        $delta = (   $marker eq $delta_up_to_date ? 0
+                   : $marker =~ m{$delta_ahead}   ? $1
+                   : $marker =~ m{$delta_behind}  ? -$1
+                   :   warn "Unexpected string '$marker' in $0 git_status().\n"
+                 );
+    }
+    return $delta;
+}
+
+# ----------------------------------------------------------------------
+# are there unstaged files?
+#
+sub detect_unstaged_files {
+    my (@raw_data) = @_;
+
+    my $newfiles   = grep {/$untracked/} @raw_data;
+    my $not_staged = grep {/$changes_not_staged/} @raw_data;
+    my $warn = $newfiles || $not_staged;
+    my $unstaged = $warn ? $UTF8->{box_x} : $UTF8->{box_check};
+
+    return ( $unstaged, $warn );
+}
+
+# ----------------------------------------------------------------------
+# Are there staged but uncommitted changes?
+#
+sub detect_uncommited_changes {
+    my (@raw_data) = @_;
+
+    my $changes = grep {/$uncommitted/} (@raw_data);
+    my $uncommitted = $changes ? $UTF8->{ballot_x} : $UTF8->{checkmark};
+
+    return ( $uncommitted, $changes );
+}
+
+# ----------------------------------------------------------------------
+#
+sub git_status {
+
+    my $status_colour = $ANSI->{green};    # optimistic default value
+
+    my @raw_data = query_git_status;
+
+    my $branch = extract_branch(@raw_data);
+
+    my $delta = calculate_delta(@raw_data);
+    $status_colour = $ANSI->{red} if $delta;
+
+    my ( $unstaged, $warn ) = detect_unstaged_files(@raw_data);
+    $status_colour = $ANSI->{red} if $warn;
+
+    my ( $uncommitted, $warn2 ) = detect_uncommited_changes(@raw_data);
+    $status_colour = $ANSI->{red} if $warn2;
 
     # ----------------------------------------------------------------------
-    # are there unstaged files?
-    my $newfiles = grep {/$untracked/} @response;
-    my $not_staged = grep {/Changes not staged for commit:/} @response;
-    my $unstaged = $newfiles || $not_staged? $UTF8->{box_x} : $UTF8->{box_check};
-    $summary = $ANSI->{red} if $newfiles || $not_staged;
-
-    # ----------------------------------------------------------------------
-    # Are there uncommitted changes?
-    my $changes = grep {/$uncommitted/} ( @response );
-    my $uncommitted = $changes ? $UTF8->{ballot_x} : $UTF8->{checkmark} ;
-    $summary = $ANSI->{red} if $changes;
-
-    # ----------------------------------------------------------------------
-    return [ $summary, $branch, $delta, $unstaged, $uncommitted ]
+    return [ $status_colour, $branch, $delta, $unstaged, $uncommitted ]
 
 }
 
@@ -94,7 +139,9 @@ sub git_status {
 #
 sub main {
     exit unless git_branch();
-    my $string = join ' ', @{git_status()};
+    my $string = join ' ', @{ git_status() };
+
+    binmode STDOUT, ':encoding(UTF-8)';
     say $string;
 }
 
